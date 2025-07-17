@@ -1,0 +1,13 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "PyDrums: Setup Training Data",
+      "type": "shell",
+      "command": "source .venv/bin/activate && pydrums setup-data",
+      "group": "build",
+      "isBackground": false,
+      "problemMatcher": []
+    }
+  ]
+}
