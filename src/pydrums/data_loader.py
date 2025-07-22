@@ -230,11 +230,11 @@ class DataLoader:
     
     def _generate_training_examples(self, pattern_str: str, style: str, 
                                   time_sig: str, name: str) -> List[Dict[str, str]]:
-        """Generate multiple training examples from one pattern"""
+        """Generate multiple training examples from one pattern, including speed variations"""
         examples = []
         
-        # Base prompts
-        prompts = [
+        # Base prompts (normal speed)
+        base_prompts = [
             f"Create a {style} drum pattern",
             f"Generate a {style} beat",
             f"Make a {style} drum loop",
@@ -243,21 +243,183 @@ class DataLoader:
         
         # Add time signature specific prompts
         if time_sig == "4/4":
-            prompts.append(f"Generate a standard {style} beat")
+            base_prompts.append(f"Generate a standard {style} beat")
         elif time_sig == "12/8":
-            prompts.append(f"Create a {style} shuffle pattern")
+            base_prompts.append(f"Create a {style} shuffle pattern")
         
-        # Create training pairs
-        for prompt in prompts:
+        # Generate normal speed examples
+        for prompt in base_prompts:
             examples.append({
                 "input": prompt,
                 "output": pattern_str,
                 "style": style,
                 "time_signature": time_sig,
-                "source_pattern": name
+                "source_pattern": name,
+                "speed": "normal",
+                "pattern_length": len(pattern_str.split(';')[0].split(':')[1].strip()) if ':' in pattern_str else 16
             })
         
+        # Generate speed variation examples
+        speed_variations = self._generate_speed_variations(pattern_str, style, time_sig, name)
+        examples.extend(speed_variations)
+        
         return examples
+    
+    def _generate_speed_variations(self, pattern_str: str, style: str, 
+                                 time_sig: str, name: str) -> List[Dict[str, str]]:
+        """Generate speed variation training examples"""
+        variations = []
+        
+        # Half-time variations (double length, half speed)
+        half_time_pattern = self._create_half_time_pattern(pattern_str)
+        half_time_prompts = [
+            f"Create a half-time {style} groove",
+            f"Generate a slow {style} pattern with long notes",
+            f"Make a {style} beat in half-time",
+            f"Create a laid-back {style} groove"
+        ]
+        
+        for prompt in half_time_prompts:
+            variations.append({
+                "input": prompt,
+                "output": half_time_pattern,
+                "style": style,
+                "time_signature": time_sig,
+                "source_pattern": f"{name}_halftime",
+                "speed": "half_time",
+                "pattern_length": len(half_time_pattern.split(';')[0].split(':')[1].strip()) if ':' in half_time_pattern else 32
+            })
+        
+        # Double-time variations (half length, double speed)
+        double_time_pattern = self._create_double_time_pattern(pattern_str)
+        double_time_prompts = [
+            f"Create a double-time {style} beat",
+            f"Generate a fast {style} pattern with rapid hits",
+            f"Make a {style} groove in double-time",
+            f"Create an uptempo {style} rhythm"
+        ]
+        
+        for prompt in double_time_prompts:
+            variations.append({
+                "input": prompt,
+                "output": double_time_pattern,
+                "style": style,
+                "time_signature": time_sig,
+                "source_pattern": f"{name}_doubletime",
+                "speed": "double_time", 
+                "pattern_length": len(double_time_pattern.split(';')[0].split(':')[1].strip()) if ':' in double_time_pattern else 8
+            })
+        
+        # Quarter note variations (simpler, emphasize strong beats)
+        quarter_pattern = self._create_quarter_note_pattern(pattern_str)
+        quarter_prompts = [
+            f"Create a simple {style} pattern with quarter notes",
+            f"Generate a basic {style} beat on the strong beats",
+            f"Make a minimal {style} groove",
+            f"Create a {style} pattern with quarter note emphasis"
+        ]
+        
+        for prompt in quarter_prompts:
+            variations.append({
+                "input": prompt,
+                "output": quarter_pattern,
+                "style": style,
+                "time_signature": time_sig,
+                "source_pattern": f"{name}_quarter",
+                "speed": "quarter_notes",
+                "pattern_length": len(quarter_pattern.split(';')[0].split(':')[1].strip()) if ':' in quarter_pattern else 4
+            })
+        
+        return variations
+    
+    def _create_half_time_pattern(self, pattern_str: str) -> str:
+        """Create half-time version by stretching pattern with rests"""
+        if not pattern_str:
+            return pattern_str
+        
+        parts = pattern_str.split(';')
+        stretched_parts = []
+        
+        for part in parts:
+            part = part.strip()
+            if ':' not in part:
+                continue
+                
+            drum, pattern = part.split(':', 1)
+            drum = drum.strip()
+            pattern = pattern.strip()
+            
+            # Stretch by adding rest after each character
+            stretched = ""
+            for char in pattern:
+                stretched += char + "-"
+            
+            stretched_parts.append(f"{drum}: {stretched}")
+        
+        return "; ".join(stretched_parts)
+    
+    def _create_double_time_pattern(self, pattern_str: str) -> str:
+        """Create double-time version by compressing pattern"""
+        if not pattern_str:
+            return pattern_str
+        
+        parts = pattern_str.split(';')
+        compressed_parts = []
+        
+        for part in parts:
+            part = part.strip()
+            if ':' not in part:
+                continue
+                
+            drum, pattern = part.split(':', 1)
+            drum = drum.strip()
+            pattern = pattern.strip()
+            
+            # Compress by taking every other character, but keep hits
+            compressed = ""
+            for i, char in enumerate(pattern):
+                if i % 2 == 0:  # Take every other position
+                    compressed += char
+            
+            # Ensure minimum length of 4
+            if len(compressed) < 4:
+                compressed = (compressed + "----")[:4]
+                
+            compressed_parts.append(f"{drum}: {compressed}")
+        
+        return "; ".join(compressed_parts)
+    
+    def _create_quarter_note_pattern(self, pattern_str: str) -> str:
+        """Create quarter note version with hits only on strong beats"""
+        if not pattern_str:
+            return pattern_str
+        
+        parts = pattern_str.split(';')
+        quarter_parts = []
+        
+        for part in parts:
+            part = part.strip()
+            if ':' not in part:
+                continue
+                
+            drum, pattern = part.split(':', 1)
+            drum = drum.strip()
+            pattern = pattern.strip()
+            
+            # Extract quarter note positions (beats 1, 2, 3, 4)
+            quarter_pattern = ""
+            for i in range(4):
+                pos = i * 4  # Position 0, 4, 8, 12 for quarter notes
+                if pos < len(pattern):
+                    char = pattern[pos]
+                    # Keep hits, convert everything else to rest
+                    quarter_pattern += char if char in ['x', 'R', '_', '['] else "-"
+                else:
+                    quarter_pattern += "-"
+            
+            quarter_parts.append(f"{drum}: {quarter_pattern}")
+        
+        return "; ".join(quarter_parts)
     
     def save_training_data(self, training_data: List[Dict[str, str]], filename: str = "training_data.json"):
         """Save training data to file

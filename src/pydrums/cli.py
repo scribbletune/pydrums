@@ -50,7 +50,7 @@ def setup_data_command(args):
     print(f"\n📊 Total patterns collected: {len(all_patterns)}")
     
     # Convert to training data
-    print("🔄 Converting patterns to training data...")
+    print("🔄 Converting patterns to training data with speed variations...")
     training_data = loader.convert_patterns_to_training_data(all_patterns)
     
     # Save training data
@@ -58,10 +58,62 @@ def setup_data_command(args):
     
     # Show statistics
     stats = loader.get_data_statistics(training_data)
-    print("\\n📊 TRAINING DATA STATISTICS:")
+    print("\n📊 TRAINING DATA STATISTICS:")
     print(f"Total examples: {stats['total_examples']}")
     print(f"Unique styles: {stats['unique_styles']}")
     print(f"Style distribution: {stats['style_distribution']}")
+    
+    # Show speed distribution
+    speed_distribution = {}
+    for example in training_data:
+        speed = example.get('speed', 'normal')
+        speed_distribution[speed] = speed_distribution.get(speed, 0) + 1
+    
+    print(f"Speed distribution: {speed_distribution}")
+    print("\n🎯 Speed variations now available:")
+    print("  - Normal speed (16th notes)")
+    print("  - Half-time (32nd notes, slower feel)")  
+    print("  - Double-time (8th notes, faster feel)")
+    print("  - Quarter notes (simple, strong beats)")
+
+
+def regenerate_training_data_command(args):
+    """Regenerate training data with enhanced speed variations"""
+    print("🔄 Regenerating training data with speed variations...")
+    
+    loader = DataLoader(args.data_dir)
+    
+    # Load existing patterns  
+    patterns_260 = loader.load_drum_machine_patterns_260()
+    print(f"📊 Loaded {len(patterns_260)} base patterns")
+    
+    # Convert to enhanced training data
+    training_data = loader.convert_patterns_to_training_data(patterns_260)
+    
+    # Save enhanced training data
+    loader.save_training_data(training_data, "training_data_enhanced.json")
+    
+    # Show enhanced statistics
+    stats = loader.get_data_statistics(training_data)
+    speed_distribution = {}
+    pattern_length_distribution = {}
+    
+    for example in training_data:
+        speed = example.get('speed', 'normal')
+        speed_distribution[speed] = speed_distribution.get(speed, 0) + 1
+        
+        length = example.get('pattern_length', 16)
+        pattern_length_distribution[length] = pattern_length_distribution.get(length, 0) + 1
+    
+    print("\n🎉 ENHANCED TRAINING DATA GENERATED:")
+    print(f"Total examples: {stats['total_examples']}")
+    print(f"Speed distribution: {speed_distribution}")
+    print(f"Pattern lengths: {sorted(pattern_length_distribution.keys())}")
+    print("\n✅ You can now generate patterns with speed variations!")
+    print("Examples:")
+    print('  pydrums generate -d "Create a half-time funk groove" --to-midi')
+    print('  pydrums generate -d "Generate a double-time rock beat" --to-midi')
+    print('  pydrums generate -d "Make a simple quarter note disco pattern" --to-midi')
 
 
 def generate_command(args):
@@ -102,9 +154,12 @@ def generate_command(args):
         midi_files = converter.batch_convert(
             results,
             tempo_bpm=args.tempo,
-            loop_count=args.loops
+            loop_count=args.loops,
+            include_tempo=args.include_tempo
         )
         print(f"🎼 Created {len(midi_files)} MIDI files")
+        if not args.include_tempo:
+            print("   ℹ️  MIDI files are tempo-neutral (no tempo metadata)")
     
     # Save results
     if args.save_patterns:
@@ -127,9 +182,12 @@ def convert_command(args):
             args.pattern,
             args.description or "custom_pattern",
             tempo_bpm=args.tempo,
-            loop_count=args.loops
+            loop_count=args.loops,
+            include_tempo=args.include_tempo
         )
         print(f"✅ Created: {output_path}")
+        if not args.include_tempo:
+            print("   ℹ️  MIDI file is tempo-neutral (no tempo metadata)")
     
     elif args.patterns_file:
         # Convert patterns from file
@@ -146,9 +204,12 @@ def convert_command(args):
         midi_files = converter.batch_convert(
             patterns,
             tempo_bpm=args.tempo,
-            loop_count=args.loops
+            loop_count=args.loops,
+            include_tempo=args.include_tempo
         )
         print(f"✅ Created {len(midi_files)} MIDI files")
+        if not args.include_tempo:
+            print("   ℹ️  MIDI files are tempo-neutral (no tempo metadata)")
 
 
 def info_command(args):
@@ -225,6 +286,11 @@ Examples:
     setup_parser.add_argument('--additional-url', help='Additional JSON data source URL')
     setup_parser.add_argument('--additional-name', help='Name for additional data source')
     
+    # Regenerate training data command (NEW)
+    regen_parser = subparsers.add_parser('regenerate-training', 
+                                        help='Regenerate training data with speed variations')
+    regen_parser.add_argument('--data-dir', default='data', help='Data directory')
+    
     # Generate command
     gen_parser = subparsers.add_parser('generate', help='Generate drum patterns')
     gen_parser.add_argument('-d', '--description', help='Pattern description')
@@ -243,6 +309,8 @@ Examples:
                            help='Save generated patterns to JSON')
     gen_parser.add_argument('--tempo', type=int, default=120,
                            help='MIDI tempo (BPM)')
+    gen_parser.add_argument('--include-tempo', action='store_true',
+                           help='Include tempo information in MIDI files (default: tempo-neutral)')
     gen_parser.add_argument('--loops', type=int, default=4,
                            help='Number of pattern loops in MIDI')
     
@@ -252,6 +320,8 @@ Examples:
     conv_parser.add_argument('-f', '--patterns-file', help='JSON file with patterns')
     conv_parser.add_argument('-d', '--description', help='Pattern description')
     conv_parser.add_argument('--tempo', type=int, default=120, help='MIDI tempo (BPM)')
+    conv_parser.add_argument('--include-tempo', action='store_true',
+                            help='Include tempo information in MIDI files (default: tempo-neutral)')
     conv_parser.add_argument('--loops', type=int, default=4, help='Number of loops')
     
     # Info command
@@ -266,6 +336,8 @@ Examples:
     try:
         if args.command == 'setup-data':
             setup_data_command(args)
+        elif args.command == 'regenerate-training':
+            regenerate_training_data_command(args)
         elif args.command == 'generate':
             generate_command(args)
         elif args.command == 'convert':

@@ -38,19 +38,22 @@ pip install -e .
 ### Basic Usage
 
 ```bash
-# 1. Setup training data (downloads 268 professional patterns)
+# 1. Setup training data (downloads 268 professional patterns with speed variations)
 pydrums setup-data --skip-primary
 
-# 2. Generate a pattern from 17 available styles
+# 2. Generate a pattern from 17 available styles with speed control
 pydrums generate -d "Create a funky afro-cuban beat" --to-midi
 
-# 3. Interactive mode - try any of the 17 styles!
+# 3. Interactive mode - try any of the 17 styles with speed variations!
 pydrums generate --interactive
 
 # 4. Convert pattern string to MIDI
 pydrums convert -p "ch: x-x-x-x-; sd: ----x---; bd: x-----x-"
 
-# 5. Check your expanded dataset
+# 5. Regenerate training data with enhanced speed variations
+pydrums regenerate-training
+
+# 6. Check your expanded dataset
 pydrums info
 ```
 
@@ -141,6 +144,12 @@ pydrums generate -d "Create a jazz shuffle pattern" --to-midi
 pydrums generate -d "Make a disco four-on-the-floor beat" --to-midi
 pydrums generate -d "Generate a bossa nova rhythm" --to-midi
 pydrums generate -d "Create a rock ballad pattern" --to-midi
+
+# NEW: Speed variation examples
+pydrums generate -d "Create a half-time funk groove" --to-midi
+pydrums generate -d "Generate a double-time rock beat" --to-midi
+pydrums generate -d "Make a simple quarter note disco pattern" --to-midi
+pydrums generate -d "Create a laid-back jazz groove" --to-midi
 ```
 
 ### Model Selection
@@ -177,10 +186,27 @@ PyDrums includes professionally curated drum patterns from multiple sources:
 ### Current Dataset Statistics
 
 - **268 Professional Patterns**: High-quality drum machine patterns
-- **1,331 AI Training Examples**: Generated from professional patterns
+- **1,331+ AI Training Examples**: Generated from professional patterns with speed variations
 - **17 Musical Styles**: Comprehensive coverage of musical genres
+- **4 Speed Variations**: Normal, half-time, double-time, and quarter-note patterns
 - **Multiple Time Signatures**: 4/4, 12/8, 3/4, and more
 - **JSON Format**: Structured data for reliable AI training
+
+### Speed Variations Available
+
+- **Normal Speed** (16th notes): Standard drum patterns with 16-character resolution
+- **Half-Time** (32nd notes): Slower, laid-back grooves with extended spacing
+- **Double-Time** (8th notes): Fast, energetic patterns with rapid hits
+- **Quarter Notes**: Simple, minimal patterns emphasizing strong beats
+
+### Pattern Length Examples
+
+```
+Normal (16 chars):    ch: x-x-x-x-x-x-x-x-; bd: x---x---x---x---
+Half-time (32 chars): ch: x---x---x---x---x---x---x---x---; bd: x-------x-------x-------x-------
+Double-time (8 chars): ch: xxxxxxxx; bd: x-x-x-x-
+Quarter notes (4 chars): ch: xxxx; bd: xxxx
+```
 
 ### Available Musical Styles
 

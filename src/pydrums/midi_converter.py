@@ -48,15 +48,17 @@ class MidiConverter:
                        output_filename: Optional[str] = None,
                        tempo_bpm: int = 120,
                        ticks_per_beat: int = 480,
-                       loop_count: int = 4) -> Path:
+                       loop_count: int = 4,
+                       include_tempo: bool = False) -> Path:
         """Convert pattern data to MIDI file
         
         Args:
             pattern_data: Pattern data from PatternGenerator
             output_filename: Optional custom filename
-            tempo_bpm: Tempo in beats per minute
+            tempo_bpm: Tempo in beats per minute (only used if include_tempo=True)
             ticks_per_beat: MIDI resolution
             loop_count: Number of times to repeat the pattern
+            include_tempo: Whether to include tempo metadata (False = tempo-neutral)
             
         Returns:
             Path to created MIDI file
@@ -85,7 +87,7 @@ class MidiConverter:
         )
         
         # Create MIDI file
-        self._create_midi_file(events, output_path, tempo_bpm, ticks_per_beat)
+        self._create_midi_file(events, output_path, tempo_bpm, ticks_per_beat, include_tempo)
         
         print(f"💾 MIDI saved: {output_path}")
         return output_path
@@ -194,16 +196,20 @@ class MidiConverter:
                          events: List[Dict[str, Any]], 
                          output_path: Path,
                          tempo_bpm: int,
-                         ticks_per_beat: int):
+                         ticks_per_beat: int,
+                         include_tempo: bool = False):
         """Create MIDI file from events"""
         # Create new MIDI file
         mid = mido.MidiFile(ticks_per_beat=ticks_per_beat)
         track = mido.MidiTrack()
         mid.tracks.append(track)
         
-        # Set tempo
-        tempo = mido.bpm2tempo(tempo_bpm)
-        track.append(mido.MetaMessage('set_tempo', tempo=tempo, time=0))
+        # Conditionally set tempo
+        if include_tempo:
+            tempo = mido.bpm2tempo(tempo_bpm)
+            track.append(mido.MetaMessage('set_tempo', tempo=tempo, time=0))
+        # NOTE: If include_tempo=False, MIDI will be tempo-neutral
+        # This allows the DAW to control the tempo completely
         
         # Set to drum channel (channel 9, 0-indexed)
         track.append(mido.Message('program_change', channel=9, program=0, time=0))

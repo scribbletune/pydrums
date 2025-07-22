@@ -94,13 +94,26 @@ class PatternGenerator:
     def _find_relevant_examples(self, description: str, 
                                style_hint: Optional[str], 
                                num_examples: int) -> List[Dict[str, Any]]:
-        """Find relevant training examples for few-shot learning"""
+        """Find relevant training examples for few-shot learning, including speed detection"""
         relevant_examples = []
         keywords = description.lower().split()
         
         # Add style hint to keywords if provided
         if style_hint:
             keywords.append(style_hint.lower())
+        
+        # Detect speed keywords
+        speed_keywords = {
+            'half-time': ['half', 'slow', 'laid-back', 'long'],
+            'double-time': ['double', 'fast', 'rapid', 'quick', 'uptempo'],
+            'quarter': ['simple', 'basic', 'minimal', 'quarter']
+        }
+        
+        detected_speed = None
+        for speed_type, speed_words in speed_keywords.items():
+            if any(word in keywords for word in speed_words):
+                detected_speed = speed_type
+                break
         
         # Score examples by relevance
         scored_examples = []
@@ -109,6 +122,7 @@ class PatternGenerator:
             score = 0
             example_text = example.get('input', '').lower()
             example_style = example.get('style', '').lower()
+            example_speed = example.get('speed', 'normal')
             
             # Score based on keyword matches
             for keyword in keywords:
@@ -116,6 +130,22 @@ class PatternGenerator:
                     score += 2
                 if keyword in example_style:
                     score += 3
+            
+            # Bonus score for speed matching
+            if detected_speed:
+                if detected_speed == 'half-time' and example_speed == 'half_time':
+                    score += 5
+                elif detected_speed == 'double-time' and example_speed == 'double_time':
+                    score += 5
+                elif detected_speed == 'quarter' and example_speed == 'quarter_notes':
+                    score += 5
+                # Slight penalty for mismatched speeds
+                elif example_speed != 'normal' and example_speed != detected_speed.replace('-', '_'):
+                    score -= 1
+            else:
+                # Prefer normal speed when no speed is specified
+                if example_speed == 'normal':
+                    score += 1
             
             if score > 0:
                 scored_examples.append((score, example))
