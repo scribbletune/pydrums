@@ -148,6 +148,21 @@ def generate_command(args):
         temperature=args.temperature
     )
     
+    # Display results with speed information
+    for i, result in enumerate(results, 1):
+        print(f"\n🎵 Pattern {i}: {result['description']}")
+        print(f"   Pattern: {result['pattern_line']}")
+        print(f"   Valid: {result['is_valid']}")
+        detected_speed = result.get('detected_speed')
+        if detected_speed and detected_speed != 'normal':
+            print(f"   🎯 Detected Speed: {detected_speed}")
+        else:
+            print(f"   Speed: normal (16th notes)")
+        
+        # Show if random examples were used
+        if result.get('used_random_fallback', False):
+            print(f"   ⚠️  Used random examples (no keyword matches found)")
+    
     # Convert to MIDI if requested
     if args.to_midi:
         converter = MidiConverter(args.output_dir)
@@ -157,7 +172,7 @@ def generate_command(args):
             loop_count=args.loops,
             include_tempo=args.include_tempo
         )
-        print(f"🎼 Created {len(midi_files)} MIDI files")
+        print(f"\n🎼 Created {len(midi_files)} MIDI files with speed-appropriate timing")
         if not args.include_tempo:
             print("   ℹ️  MIDI files are tempo-neutral (no tempo metadata)")
     

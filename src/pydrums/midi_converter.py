@@ -49,7 +49,8 @@ class MidiConverter:
                        tempo_bpm: int = 120,
                        ticks_per_beat: int = 480,
                        loop_count: int = 4,
-                       include_tempo: bool = False) -> Path:
+                       include_tempo: bool = False,
+                       override_speed: Optional[str] = None) -> Path:
         """Convert pattern data to MIDI file
         
         Args:
@@ -59,10 +60,16 @@ class MidiConverter:
             ticks_per_beat: MIDI resolution
             loop_count: Number of times to repeat the pattern
             include_tempo: Whether to include tempo metadata (False = tempo-neutral)
+            override_speed: Override the detected speed ('normal', 'half-time', 'double-time', 'quarter')
             
         Returns:
             Path to created MIDI file
         """
+        # Determine the speed to use
+        speed = override_speed or pattern_data.get('detected_speed', 'normal')
+        
+        # Calculate timing based on speed
+        ticks_per_note = self._calculate_ticks_per_note(ticks_per_beat, speed)
         # Generate filename if not provided
         if not output_filename:
             description = pattern_data.get('description', 'pattern')
@@ -81,9 +88,9 @@ class MidiConverter:
         if not drum_patterns:
             raise ValueError("No valid drum patterns found in pattern data")
         
-        # Convert to MIDI events
+        # Convert to MIDI events with speed-adjusted timing
         events = self._patterns_to_midi_events(
-            drum_patterns, ticks_per_beat, loop_count
+            drum_patterns, ticks_per_note, loop_count
         )
         
         # Create MIDI file
@@ -119,13 +126,35 @@ class MidiConverter:
         
         return drum_patterns
     
+    def _calculate_ticks_per_note(self, ticks_per_beat: int, speed: Optional[str]) -> int:
+        """Calculate ticks per note based on speed setting
+        
+        Args:
+            ticks_per_beat: Base MIDI resolution
+            speed: Speed setting ('normal', 'half-time', 'double-time', 'quarter', or None)
+            
+        Returns:
+            Ticks per pattern note position
+        """
+        speed_multipliers = {
+            'half-time': 2,      # Each pattern position = 8th note (slower)
+            'double-time': 0.5,  # Each pattern position = 32nd note (faster)  
+            'quarter': 4,        # Each pattern position = quarter note (much slower)
+            'normal': 1,         # Each pattern position = 16th note (default)
+            None: 1              # Default to normal if no speed detected
+        }
+        
+        multiplier = speed_multipliers.get(speed, 1)
+        base_ticks_per_16th = ticks_per_beat // 4
+        
+        return int(base_ticks_per_16th * multiplier)
+    
     def _patterns_to_midi_events(self, 
                                 drum_patterns: Dict[str, str], 
-                                ticks_per_beat: int,
+                                ticks_per_note: int,
                                 loop_count: int) -> List[Dict[str, Any]]:
         """Convert drum patterns to MIDI events"""
         events = []
-        ticks_per_16th = ticks_per_beat // 4  # 16th note resolution
         
         for drum, pattern in drum_patterns.items():
             if drum not in self.DRUM_MIDI_MAP:
@@ -136,11 +165,11 @@ class MidiConverter:
             
             # Process each loop
             for loop in range(loop_count):
-                loop_offset = loop * len(pattern) * ticks_per_16th
+                loop_offset = loop * len(pattern) * ticks_per_note
                 
                 # Process each character in pattern
                 for i, char in enumerate(pattern):
-                    tick_time = loop_offset + (i * ticks_per_16th)
+                    tick_time = loop_offset + (i * ticks_per_note)
                     
                     if char == 'x':
                         # Normal hit
@@ -148,17 +177,17 @@ class MidiConverter:
                             'time': tick_time,
                             'note': midi_note,
                             'velocity': 100,
-                            'duration': ticks_per_16th // 2,
+                            'duration': ticks_per_note // 2,
                             'type': 'normal'
                         })
                     elif char == 'R':
                         # Roll - create multiple rapid hits
                         for j in range(4):
                             events.append({
-                                'time': tick_time + (j * ticks_per_16th // 4),
+                                'time': tick_time + (j * ticks_per_note // 4),
                                 'note': midi_note,
                                 'velocity': max(60, 100 - (j * 10)),
-                                'duration': ticks_per_16th // 8,
+                                'duration': ticks_per_note // 8,
                                 'type': 'roll'
                             })
                     elif char == '_':
@@ -167,17 +196,17 @@ class MidiConverter:
                             'time': tick_time,
                             'note': midi_note,
                             'velocity': 40,
-                            'duration': ticks_per_16th // 4,
+                            'duration': ticks_per_note // 4,
                             'type': 'ghost'
                         })
                     elif char == '[':
                         # Flam start - grace note before main hit
-                        grace_time = max(0, tick_time - (ticks_per_16th // 8))  # Ensure non-negative
+                        grace_time = max(0, tick_time - (ticks_per_note // 8))  # Ensure non-negative
                         events.append({
                             'time': grace_time,
                             'note': midi_note,
                             'velocity': 60,
-                            'duration': ticks_per_16th // 8,
+                            'duration': ticks_per_note // 8,
                             'type': 'flam_grace'
                         })
                         # Main hit after grace note
@@ -185,7 +214,7 @@ class MidiConverter:
                             'time': tick_time,
                             'note': midi_note,
                             'velocity': 90,
-                            'duration': ticks_per_16th // 2,
+                            'duration': ticks_per_note // 2,
                             'type': 'flam_main'
                         })
                     # ']' and '-' are handled by context or ignored

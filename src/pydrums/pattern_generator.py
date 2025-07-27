@@ -6,7 +6,7 @@ Uses Ollama and few-shot learning to generate drum patterns from text descriptio
 import ollama
 import json
 import random
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from pathlib import Path
 
 
@@ -52,10 +52,14 @@ class PatternGenerator:
             Dictionary with generated pattern and metadata
         """
         if not self.training_data:
-            return self._generate_basic_pattern(description)
+            basic_pattern = self._generate_basic_pattern(description)
+            detected_speed = self._detect_speed_from_description(description.lower())
+            basic_pattern['detected_speed'] = detected_speed
+            basic_pattern['used_random_fallback'] = False  # Using rule-based, not random
+            return basic_pattern
         
-        # Find relevant examples
-        relevant_examples = self._find_relevant_examples(
+        # Find relevant examples and detect speed
+        relevant_examples, detected_speed, used_random_fallback = self._find_relevant_examples(
             description, style_hint, num_examples
         )
         
@@ -84,16 +88,23 @@ class PatternGenerator:
             pattern_data['description'] = description
             pattern_data['model_used'] = self.model_name
             pattern_data['examples_used'] = len(relevant_examples)
+            pattern_data['detected_speed'] = detected_speed
+            pattern_data['used_random_fallback'] = used_random_fallback
             
             return pattern_data
             
         except Exception as e:
             print(f"❌ Error generating pattern: {e}")
-            return self._generate_basic_pattern(description)
+            basic_pattern = self._generate_basic_pattern(description)
+            # Add detected speed to basic pattern too
+            detected_speed = self._detect_speed_from_description(description.lower())
+            basic_pattern['detected_speed'] = detected_speed
+            basic_pattern['used_random_fallback'] = False  # Using rule-based, not random
+            return basic_pattern
     
     def _find_relevant_examples(self, description: str, 
                                style_hint: Optional[str], 
-                               num_examples: int) -> List[Dict[str, Any]]:
+                               num_examples: int) -> Tuple[List[Dict[str, Any]], Optional[str], bool]:
         """Find relevant training examples for few-shot learning, including speed detection"""
         relevant_examples = []
         keywords = description.lower().split()
@@ -102,18 +113,21 @@ class PatternGenerator:
         if style_hint:
             keywords.append(style_hint.lower())
         
-        # Detect speed keywords
-        speed_keywords = {
-            'half-time': ['half', 'slow', 'laid-back', 'long'],
-            'double-time': ['double', 'fast', 'rapid', 'quick', 'uptempo'],
-            'quarter': ['simple', 'basic', 'minimal', 'quarter']
-        }
+        # Detect speed from description using improved matching
+        detected_speed = self._detect_speed_from_description(description.lower())
         
-        detected_speed = None
-        for speed_type, speed_words in speed_keywords.items():
-            if any(word in keywords for word in speed_words):
-                detected_speed = speed_type
-                break
+        # Also check for speed in keywords for backward compatibility
+        if not detected_speed:
+            speed_keywords = {
+                'half-time': ['half', 'slow', 'long'],
+                'double-time': ['double', 'fast', 'rapid', 'quick', 'uptempo'],
+                'quarter': ['simple', 'basic', 'minimal', 'quarter']
+            }
+            
+            for speed_type, speed_words in speed_keywords.items():
+                if any(word in keywords for word in speed_words):
+                    detected_speed = speed_type
+                    break
         
         # Score examples by relevance
         scored_examples = []
@@ -125,11 +139,14 @@ class PatternGenerator:
             example_speed = example.get('speed', 'normal')
             
             # Score based on keyword matches
+            keyword_score = 0
             for keyword in keywords:
                 if keyword in example_text:
-                    score += 2
+                    keyword_score += 2
                 if keyword in example_style:
-                    score += 3
+                    keyword_score += 3
+            
+            score += keyword_score
             
             # Bonus score for speed matching
             if detected_speed:
@@ -143,8 +160,8 @@ class PatternGenerator:
                 elif example_speed != 'normal' and example_speed != detected_speed.replace('-', '_'):
                     score -= 1
             else:
-                # Prefer normal speed when no speed is specified
-                if example_speed == 'normal':
+                # Only prefer normal speed if we have keyword matches
+                if keyword_score > 0 and example_speed == 'normal':
                     score += 1
             
             if score > 0:
@@ -152,6 +169,14 @@ class PatternGenerator:
         
         # Sort by score and take top examples
         scored_examples.sort(key=lambda x: x[0], reverse=True)
+        
+        # Check if we have no meaningful matches (all scores are 0 or no examples)
+        has_meaningful_matches = len(scored_examples) > 0 and scored_examples[0][0] > 0
+        used_random_fallback = not has_meaningful_matches
+        
+        if used_random_fallback:
+            print(f"⚠️  No keyword matches found for '{description}' - using random training examples")
+        
         relevant_examples = [ex[1] for ex in scored_examples[:num_examples]]
         
         # If we don't have enough relevant examples, add random ones
@@ -170,7 +195,7 @@ class PatternGenerator:
             )
             relevant_examples.extend(additional)
         
-        return relevant_examples
+        return relevant_examples, detected_speed, used_random_fallback
     
     def _create_prompt(self, description: str, 
                       examples: List[Dict[str, Any]]) -> str:
@@ -351,6 +376,39 @@ class PatternGenerator:
             'validation_notes': ['Generated using default rock pattern']
         }
     
+    def _detect_speed_from_description(self, description_lower: str) -> Optional[str]:
+        """Detect speed from description using robust pattern matching"""
+        # Normalize the description for better matching
+        normalized = description_lower.replace('-', ' ').replace('_', ' ')
+        
+        # Speed patterns with multiple variations
+        speed_patterns = {
+            'half-time': [
+                'half time', 'halftime', 'half-time',
+                'slow', 'slower', 'laid back', 'laidback', 'laid-back',
+                'long notes', 'stretched', 'relaxed'
+            ],
+            'double-time': [
+                'double time', 'doubletime', 'double-time',
+                'fast', 'faster', 'rapid', 'quick', 'quickly',
+                'uptempo', 'up tempo', 'high tempo',
+                'short notes', 'compressed'
+            ],
+            'quarter': [
+                'quarter notes', 'quarter note', 'simple', 'basic',
+                'minimal', 'stripped down', 'four on the floor',
+                'strong beats', 'downbeats'
+            ]
+        }
+        
+        # Check each speed pattern
+        for speed_type, patterns in speed_patterns.items():
+            for pattern in patterns:
+                if pattern in normalized:
+                    return speed_type
+        
+        return None
+    
     def batch_generate(self, descriptions: List[str], **kwargs) -> List[Dict[str, Any]]:
         """Generate multiple patterns from a list of descriptions
         
@@ -393,6 +451,16 @@ class PatternGenerator:
             
             print(f"🥁 PATTERN: {result['pattern_line']}")
             print(f"✅ Valid: {result['is_valid']}")
+            
+            detected_speed = result.get('detected_speed')
+            if detected_speed and detected_speed != 'normal':
+                print(f"🎯 Detected Speed: {detected_speed}")
+            else:
+                print(f"🎯 Speed: normal (16th notes)")
+            
+            # Show if random examples were used
+            if result.get('used_random_fallback', False):
+                print(f"⚠️  Used random examples (no keyword matches found)")
             
             if result['validation_notes']:
                 print(f"📝 Notes: {', '.join(result['validation_notes'])}")
