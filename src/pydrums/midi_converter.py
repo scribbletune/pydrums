@@ -156,6 +156,11 @@ class MidiConverter:
         """Convert drum patterns to MIDI events"""
         events = []
         
+        # Find the maximum pattern length to normalize all patterns
+        max_length = max(len(pattern) for pattern in drum_patterns.values()) if drum_patterns else 16
+        print(f"🎼 Pattern lengths: {[(drum, len(pattern)) for drum, pattern in drum_patterns.items()]}")
+        print(f"🎼 Normalizing all patterns to {max_length} beats")
+        
         for drum, pattern in drum_patterns.items():
             if drum not in self.DRUM_MIDI_MAP:
                 print(f"⚠️  Unknown drum: {drum}, skipping")
@@ -163,12 +168,15 @@ class MidiConverter:
             
             midi_note = self.DRUM_MIDI_MAP[drum]
             
+            # Normalize pattern length by padding with rests
+            normalized_pattern = self._normalize_pattern_length(pattern, max_length)
+            
             # Process each loop
             for loop in range(loop_count):
-                loop_offset = loop * len(pattern) * ticks_per_note
+                loop_offset = loop * max_length * ticks_per_note  # Use normalized length for all patterns
                 
-                # Process each character in pattern
-                for i, char in enumerate(pattern):
+                # Process each character in normalized pattern
+                for i, char in enumerate(normalized_pattern):
                     tick_time = loop_offset + (i * ticks_per_note)
                     
                     if char == 'x':
@@ -220,6 +228,27 @@ class MidiConverter:
                     # ']' and '-' are handled by context or ignored
         
         return sorted(events, key=lambda x: x['time'])
+    
+    def _normalize_pattern_length(self, pattern: str, target_length: int) -> str:
+        """Normalize pattern to target length by padding with rests or truncating
+        
+        Args:
+            pattern: Original pattern string
+            target_length: Desired pattern length
+            
+        Returns:
+            Normalized pattern string
+        """
+        if len(pattern) == target_length:
+            return pattern
+        elif len(pattern) < target_length:
+            # Pad with rests to reach target length
+            padding_needed = target_length - len(pattern)
+            return pattern + ('-' * padding_needed)
+        else:
+            # Truncate if pattern is longer than target
+            print(f"⚠️  Truncating pattern '{pattern[:10]}...' from {len(pattern)} to {target_length} beats")
+            return pattern[:target_length]
     
     def _create_midi_file(self, 
                          events: List[Dict[str, Any]], 
