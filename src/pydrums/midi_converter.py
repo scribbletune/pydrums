@@ -12,7 +12,7 @@ from typing import Dict, List, Any, Optional
 class MidiConverter:
     """Convert drum patterns to MIDI files"""
     
-    # General MIDI drum mapping
+    # General MIDI drum mapping - Extended with common variations
     DRUM_MIDI_MAP = {
         'bd': 36,    # Bass Drum (Kick)
         'sd': 38,    # Snare Drum
@@ -24,9 +24,14 @@ class MidiConverter:
         'ht': 50,    # High Tom
         'mt': 47,    # Mid Tom
         'lt': 43,    # Low Tom
-        'rim': 37,   # Rim Shot
-        'cow': 56,   # Cowbell
-        'tamb': 54,  # Tambourine
+        'rs': 37,    # Rim Shot
+        'rim': 37,   # Rim Shot (alias)
+        'cb': 56,    # Cowbell
+        'cow': 56,   # Cowbell (alias)
+        'tb': 54,    # Tambourine
+        'tamb': 54,  # Tambourine (alias)
+        'cy': 49,    # Cymbal (crash)
+        'cp': 39,    # Clap
         'ride': 51,  # Ride Cymbal (alias)
         'crash': 49, # Crash Cymbal (alias)
         'kick': 36,  # Bass Drum (alias)
@@ -85,8 +90,10 @@ class MidiConverter:
             pattern_line = pattern_data.get('pattern_line', '')
             drum_patterns = self._parse_pattern_line(pattern_line)
         
-        if not drum_patterns:
-            raise ValueError("No valid drum patterns found in pattern data")
+        # Validate drum patterns before proceeding
+        validation_result = self._validate_drum_patterns(drum_patterns, pattern_data)
+        if not validation_result['is_valid']:
+            raise ValueError(f"Invalid drum patterns: {validation_result['error']}")
         
         # Convert to MIDI events with speed-adjusted timing
         events = self._patterns_to_midi_events(
@@ -100,7 +107,7 @@ class MidiConverter:
         return output_path
     
     def _parse_pattern_line(self, pattern_line: str) -> Dict[str, str]:
-        """Parse pattern line into drum patterns dictionary"""
+        """Parse pattern line into drum patterns dictionary with bracket validation"""
         drum_patterns = {}
         
         if not pattern_line:
@@ -122,9 +129,106 @@ class MidiConverter:
             drum_clean = re.sub(r'[^a-z]', '', drum)
             
             if drum_clean and pattern:
-                drum_patterns[drum_clean] = pattern
+                # Clean and validate pattern
+                cleaned_pattern = self._clean_pattern_string(pattern)
+                if cleaned_pattern:  # Only add if pattern is not empty after cleaning
+                    drum_patterns[drum_clean] = cleaned_pattern
+                else:
+                    print(f"⚠️  Empty pattern after cleaning for drum '{drum_clean}': '{pattern}'")
         
         return drum_patterns
+    
+    def _clean_pattern_string(self, pattern: str) -> str:
+        """Clean pattern string and handle bracket issues"""
+        if not pattern:
+            return ""
+        
+        # Remove any spaces within the pattern
+        pattern = ''.join(pattern.split())
+        
+        # Handle bracket issues - remove unmatched brackets
+        # Count brackets
+        open_brackets = pattern.count('[')
+        close_brackets = pattern.count(']') 
+        
+        if open_brackets != close_brackets:
+            print(f"⚠️  Unmatched brackets in pattern: {open_brackets} '[', {close_brackets} ']' - cleaning...")
+            # Remove all brackets to avoid parsing issues
+            pattern = pattern.replace('[', '').replace(']', '')
+        
+        # Validate pattern characters
+        valid_chars = set(['x', 'X', 'o', '_', '-', 'R', 'r', '[', ']', '^', '.'])
+        cleaned_chars = []
+        
+        for char in pattern:
+            if char in valid_chars:
+                cleaned_chars.append(char)
+            else:
+                print(f"⚠️  Invalid character '{char}' in pattern - replacing with '-'")
+                cleaned_chars.append('-')
+        
+        return ''.join(cleaned_chars)
+    
+    def _validate_drum_patterns(self, drum_patterns: Dict[str, str], pattern_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Validate drum patterns before MIDI conversion"""
+        
+        if not drum_patterns:
+            return {
+                'is_valid': False,
+                'error': f"No drum patterns found. Pattern line: '{pattern_data.get('pattern_line', 'None')}'"
+            }
+        
+        # Check if any drums are recognized
+        recognized_drums = []
+        unknown_drums = []
+        
+        for drum in drum_patterns.keys():
+            if drum in self.DRUM_MIDI_MAP:
+                recognized_drums.append(drum)
+            else:
+                unknown_drums.append(drum)
+        
+        if not recognized_drums:
+            return {
+                'is_valid': False,
+                'error': f"No recognized drums found. Unknown drums: {unknown_drums}. Available: {list(self.DRUM_MIDI_MAP.keys())}"
+            }
+        
+        # Check if patterns have any actual hits
+        patterns_with_hits = []
+        empty_patterns = []
+        
+        for drum, pattern in drum_patterns.items():
+            if drum in self.DRUM_MIDI_MAP:  # Only check recognized drums
+                # Check if pattern has any hit characters
+                hit_chars = ['x', 'X', 'o', 'R', 'r', '_', '[']
+                has_hits = any(char in pattern for char in hit_chars)
+                
+                if has_hits:
+                    patterns_with_hits.append(drum)
+                else:
+                    empty_patterns.append((drum, pattern))
+        
+        if not patterns_with_hits:
+            return {
+                'is_valid': False,
+                'error': f"No patterns with hits found. Empty patterns: {empty_patterns}"
+            }
+        
+        # Pattern is valid
+        result = {
+            'is_valid': True,
+            'recognized_drums': recognized_drums,
+            'patterns_with_hits': patterns_with_hits
+        }
+        
+        if unknown_drums:
+            result['warnings'] = [f"Unknown drums will be skipped: {unknown_drums}"]
+        
+        if empty_patterns:
+            result['warnings'] = result.get('warnings', []) + [f"Empty patterns will be skipped: {[d for d, p in empty_patterns]}"]
+        
+        return result
     
     def _calculate_ticks_per_note(self, ticks_per_beat: int, speed: Optional[str]) -> int:
         """Calculate ticks per note based on speed setting
@@ -225,7 +329,35 @@ class MidiConverter:
                             'duration': ticks_per_note // 2,
                             'type': 'flam_main'
                         })
-                    # ']' and '-' are handled by context or ignored
+                    elif char == 'X':
+                        # Accent hit - louder than normal
+                        events.append({
+                            'time': tick_time,
+                            'note': midi_note,
+                            'velocity': 127,  # Maximum velocity
+                            'duration': ticks_per_note // 2,
+                            'type': 'accent'
+                        })
+                    elif char == 'o':
+                        # Medium hit
+                        events.append({
+                            'time': tick_time,
+                            'note': midi_note,
+                            'velocity': 80,
+                            'duration': ticks_per_note // 2,
+                            'type': 'medium'
+                        })
+                    elif char == 'r':
+                        # Short roll - fewer hits than R
+                        for j in range(2):
+                            events.append({
+                                'time': tick_time + (j * ticks_per_note // 2),
+                                'note': midi_note,
+                                'velocity': max(50, 80 - (j * 15)),
+                                'duration': ticks_per_note // 4,
+                                'type': 'short_roll'
+                            })
+                    # ']', '^', '.', and '-' are handled by context or ignored
         
         return sorted(events, key=lambda x: x['time'])
     

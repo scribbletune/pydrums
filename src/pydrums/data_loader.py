@@ -132,6 +132,10 @@ class DataLoader:
             # Convert drum data to pattern notation
             pattern_str = self._convert_drums_to_notation(drum_data)
             
+            # Normalize all base patterns to 16 beats for consistency
+            if pattern_str:
+                pattern_str = self._normalize_pattern_string(pattern_str)
+            
             if pattern_str:
                 # Generate multiple training examples per pattern
                 training_examples = self._generate_training_examples(
@@ -191,11 +195,11 @@ class DataLoader:
         return 'general'
     
     def _convert_drums_to_notation(self, drums: Dict[str, List]) -> str:
-        """Convert drum data to pattern notation string"""
+        """Convert drum data to pattern notation string with enhanced musical representation"""
         if not drums:
             return ""
         
-        # Map drum names to abbreviations
+        # Enhanced drum mapping with more instruments
         drum_mapping = {
             'BassDrum': 'bd',
             'SnareDrum': 'sd', 
@@ -206,15 +210,33 @@ class DataLoader:
             'RideCymbal': 'rc',
             'HighTom': 'ht',
             'MidTom': 'mt',
-            'LowTom': 'lt'
+            'MediumTom': 'mt',
+            'LowTom': 'lt',
+            'RimShot': 'rs',
+            'Cymbal': 'cy',
+            'Tambourine': 'tb',
+            'Cowbell': 'cb',
+            'Clap': 'cp'
         }
         
         pattern_parts = []
         
+        # Process drums in a musical order (rhythm section first)
+        drum_order = ['BassDrum', 'SnareDrum', 'ClosedHiHat', 'OpenHiHat', 'HiHatPedal', 
+                     'RideCymbal', 'CrashCymbal', 'RimShot', 'HighTom', 'MediumTom', 
+                     'LowTom', 'Cymbal', 'Tambourine', 'Cowbell', 'Clap']
+        
+        for drum_name in drum_order:
+            if drum_name in drums and drums[drum_name]:
+                notation = self._hits_to_notation(drums[drum_name])
+                if notation and notation != "-" * len(notation):  # Skip empty patterns
+                    pattern_parts.append(f"{drum_mapping[drum_name]}: {notation}")
+        
+        # Add any remaining drums not in the order
         for drum_name, hits in drums.items():
-            if drum_name in drum_mapping and hits:
+            if drum_name not in drum_order and drum_name in drum_mapping and hits:
                 notation = self._hits_to_notation(hits)
-                if notation:
+                if notation and notation != "-" * len(notation):
                     pattern_parts.append(f"{drum_mapping[drum_name]}: {notation}")
         
         return "; ".join(pattern_parts)
@@ -230,25 +252,41 @@ class DataLoader:
     
     def _generate_training_examples(self, pattern_str: str, style: str, 
                                   time_sig: str, name: str) -> List[Dict[str, str]]:
-        """Generate multiple training examples from one pattern, including speed variations"""
+        """Generate diverse training examples from one pattern with musical variation"""
         examples = []
         
-        # Base prompts (normal speed)
+        # Create more varied and musically descriptive prompts
+        style_descriptors = {
+            'rock': ['heavy', 'driving', 'steady', 'powerful', 'straight'],
+            'funk': ['syncopated', 'groovy', 'tight', 'pocket', 'with ghost notes'],
+            'jazz': ['swinging', 'brushed', 'subtle', 'loose', 'walking'],
+            'disco': ['four on the floor', 'danceable', 'steady', 'pumping'],
+            'reggae': ['one drop', 'laid back', 'off-beat', 'skank'],
+            'latin': ['syncopated', 'complex', 'polyrhythmic', 'spicy'],
+            'afro': ['polyrhythmic', 'complex', 'traditional', 'layered'],
+            'blues': ['shuffled', 'swinging', 'laid back', 'soulful'],
+            'ballad': ['gentle', 'soft', 'slow', 'emotional'],
+            'pop': ['catchy', 'simple', 'accessible', 'radio-friendly']
+        }
+        
+        descriptors = style_descriptors.get(style, ['basic', 'simple', 'standard'])
+        
+        # Generate 2-3 examples per pattern (reduced from 5+ identical ones)
         base_prompts = [
             f"Create a {style} drum pattern",
-            f"Generate a {style} beat",
-            f"Make a {style} drum loop",
-            f"Create a {time_sig} {style} pattern",
+            f"Generate a {descriptors[0]} {style} beat"
         ]
         
-        # Add time signature specific prompts
+        # Add time signature and descriptor-specific prompts
         if time_sig == "4/4":
-            base_prompts.append(f"Generate a standard {style} beat")
+            base_prompts.append(f"Make a {descriptors[1] if len(descriptors) > 1 else 'standard'} {style} groove")
         elif time_sig == "12/8":
-            base_prompts.append(f"Create a {style} shuffle pattern")
+            base_prompts.append(f"Create a {style} shuffle with {descriptors[0]} feel")
+        elif time_sig == "6/8":
+            base_prompts.append(f"Generate a {style} pattern in 6/8 time")
         
-        # Generate normal speed examples
-        for prompt in base_prompts:
+        # Only create 2-3 base examples instead of 5+
+        for i, prompt in enumerate(base_prompts[:3]):
             examples.append({
                 "input": prompt,
                 "output": pattern_str,
@@ -256,89 +294,90 @@ class DataLoader:
                 "time_signature": time_sig,
                 "source_pattern": name,
                 "speed": "normal",
-                "pattern_length": len(pattern_str.split(';')[0].split(':')[1].strip()) if ':' in pattern_str else 16
+                "pattern_length": len(pattern_str.split(';')[0].split(':')[1].strip()) if ':' in pattern_str else 16,
+                "variation": f"base_{i+1}"
             })
         
-        # Generate speed variation examples
+        # Generate speed variation examples (but fewer of them)
         speed_variations = self._generate_speed_variations(pattern_str, style, time_sig, name)
-        examples.extend(speed_variations)
+        examples.extend(speed_variations[:6])  # Limit speed variations
         
         return examples
     
     def _generate_speed_variations(self, pattern_str: str, style: str, 
                                  time_sig: str, name: str) -> List[Dict[str, str]]:
-        """Generate speed variation training examples"""
+        """Generate speed variation training examples with better musical accuracy"""
         variations = []
         
-        # Half-time variations (double length, half speed)
+        # Half-time variations (double length, half speed) - only 2 examples
         half_time_pattern = self._create_half_time_pattern(pattern_str)
-        half_time_prompts = [
-            f"Create a half-time {style} groove",
-            f"Generate a slow {style} pattern with long notes",
-            f"Make a {style} beat in half-time",
-            f"Create a laid-back {style} groove"
-        ]
+        if half_time_pattern and half_time_pattern != pattern_str:
+            half_time_prompts = [
+                f"Create a half-time {style} groove",
+                f"Generate a laid-back {style} pattern"
+            ]
+            
+            for prompt in half_time_prompts:
+                variations.append({
+                    "input": prompt,
+                    "output": half_time_pattern,
+                    "style": style,
+                    "time_signature": time_sig,
+                    "source_pattern": f"{name}_halftime",
+                    "speed": "half_time",
+                    "pattern_length": len(half_time_pattern.split(';')[0].split(':')[1].strip()) if ':' in half_time_pattern else 32,
+                    "variation": "half_time"
+                })
         
-        for prompt in half_time_prompts:
-            variations.append({
-                "input": prompt,
-                "output": half_time_pattern,
-                "style": style,
-                "time_signature": time_sig,
-                "source_pattern": f"{name}_halftime",
-                "speed": "half_time",
-                "pattern_length": len(half_time_pattern.split(';')[0].split(':')[1].strip()) if ':' in half_time_pattern else 32
-            })
-        
-        # Double-time variations (half length, double speed)
+        # Double-time variations (half length, double speed) - only 2 examples
         double_time_pattern = self._create_double_time_pattern(pattern_str)
-        double_time_prompts = [
-            f"Create a double-time {style} beat",
-            f"Generate a fast {style} pattern with rapid hits",
-            f"Make a {style} groove in double-time",
-            f"Create an uptempo {style} rhythm"
-        ]
+        if double_time_pattern and double_time_pattern != pattern_str:
+            double_time_prompts = [
+                f"Create a double-time {style} beat",
+                f"Generate a fast {style} rhythm"
+            ]
+            
+            for prompt in double_time_prompts:
+                variations.append({
+                    "input": prompt,
+                    "output": double_time_pattern,
+                    "style": style,
+                    "time_signature": time_sig,
+                    "source_pattern": f"{name}_doubletime",
+                    "speed": "double_time", 
+                    "pattern_length": len(double_time_pattern.split(';')[0].split(':')[1].strip()) if ':' in double_time_pattern else 8,
+                    "variation": "double_time"
+                })
         
-        for prompt in double_time_prompts:
-            variations.append({
-                "input": prompt,
-                "output": double_time_pattern,
-                "style": style,
-                "time_signature": time_sig,
-                "source_pattern": f"{name}_doubletime",
-                "speed": "double_time", 
-                "pattern_length": len(double_time_pattern.split(';')[0].split(':')[1].strip()) if ':' in double_time_pattern else 8
-            })
-        
-        # Quarter note variations (simpler, emphasize strong beats)
+        # Quarter note variations (simpler, emphasize strong beats) - only 2 examples
         quarter_pattern = self._create_quarter_note_pattern(pattern_str)
-        quarter_prompts = [
-            f"Create a simple {style} pattern with quarter notes",
-            f"Generate a basic {style} beat on the strong beats",
-            f"Make a minimal {style} groove",
-            f"Create a {style} pattern with quarter note emphasis"
-        ]
-        
-        for prompt in quarter_prompts:
-            variations.append({
-                "input": prompt,
-                "output": quarter_pattern,
-                "style": style,
-                "time_signature": time_sig,
-                "source_pattern": f"{name}_quarter",
-                "speed": "quarter_notes",
-                "pattern_length": len(quarter_pattern.split(';')[0].split(':')[1].strip()) if ':' in quarter_pattern else 4
-            })
+        if quarter_pattern and quarter_pattern != pattern_str:
+            quarter_prompts = [
+                f"Create a simple {style} pattern with quarter notes",
+                f"Generate a basic {style} beat on strong beats"
+            ]
+            
+            for prompt in quarter_prompts:
+                variations.append({
+                    "input": prompt,
+                    "output": quarter_pattern,
+                    "style": style,
+                    "time_signature": time_sig,
+                    "source_pattern": f"{name}_quarter",
+                    "speed": "quarter_notes",
+                    "pattern_length": len(quarter_pattern.split(';')[0].split(':')[1].strip()) if ':' in quarter_pattern else 4,
+                    "variation": "quarter_notes"
+                })
         
         return variations
     
     def _create_half_time_pattern(self, pattern_str: str) -> str:
-        """Create half-time version by stretching pattern with rests"""
+        """Create half-time version by placing hits on different beats (still 16 length)"""
         if not pattern_str:
             return pattern_str
         
         parts = pattern_str.split(';')
-        stretched_parts = []
+        half_time_parts = []
         
         for part in parts:
             part = part.strip()
@@ -349,22 +388,35 @@ class DataLoader:
             drum = drum.strip()
             pattern = pattern.strip()
             
-            # Stretch by adding rest after each character
-            stretched = ""
-            for char in pattern:
-                stretched += char + "-"
+            # Normalize to 16 beats first
+            pattern = self._normalize_pattern_length(pattern, 16)
             
-            stretched_parts.append(f"{drum}: {stretched}")
+            # Create half-time feel by shifting emphasis and reducing density
+            half_time = ""
+            for i in range(16):
+                if i < len(pattern):
+                    char = pattern[i]
+                    # Half-time: put snare on beat 3 (position 8), kick on 1 and weak positions
+                    if i in [0, 8]:  # Strong beats in half-time
+                        half_time += char if char != '-' else char
+                    elif i in [2, 4, 6, 10, 12, 14]:  # Keep some groove elements
+                        half_time += char if char in ['x', 'X', 'o', '_'] else '-'
+                    else:
+                        half_time += '-'
+                else:
+                    half_time += '-'
+            
+            half_time_parts.append(f"{drum}: {half_time}")
         
-        return "; ".join(stretched_parts)
+        return "; ".join(half_time_parts)
     
     def _create_double_time_pattern(self, pattern_str: str) -> str:
-        """Create double-time version by compressing pattern"""
+        """Create double-time version with more frequent hits (still 16 length)"""
         if not pattern_str:
             return pattern_str
         
         parts = pattern_str.split(';')
-        compressed_parts = []
+        double_time_parts = []
         
         for part in parts:
             part = part.strip()
@@ -375,22 +427,42 @@ class DataLoader:
             drum = drum.strip()
             pattern = pattern.strip()
             
-            # Compress by taking every other character, but keep hits
-            compressed = ""
-            for i, char in enumerate(pattern):
-                if i % 2 == 0:  # Take every other position
-                    compressed += char
+            # Normalize to 16 beats first
+            pattern = self._normalize_pattern_length(pattern, 16)
             
-            # Ensure minimum length of 4
-            if len(compressed) < 4:
-                compressed = (compressed + "----")[:4]
-                
-            compressed_parts.append(f"{drum}: {compressed}")
+            # Create double-time feel by doubling hit frequency
+            double_time = ""
+            for i in range(16):
+                if i < len(pattern):
+                    char = pattern[i]
+                    # For double-time, add more frequent hits
+                    if char in ['x', 'X', 'o', '_']:
+                        double_time += char
+                    elif i % 2 == 0 and pattern[i//2] in ['x', 'X', 'o']:
+                        # Add extra hits on off-beats for double-time feel
+                        double_time += 'x' if char == '-' else char
+                    else:
+                        double_time += char
+                else:
+                    double_time += '-'
+            
+            double_time_parts.append(f"{drum}: {double_time}")
         
-        return "; ".join(compressed_parts)
+        return "; ".join(double_time_parts)
+    
+    def _normalize_pattern_length(self, pattern: str, target_length: int = 16) -> str:
+        """Normalize pattern to target length (default 16 beats)"""
+        if len(pattern) == target_length:
+            return pattern
+        elif len(pattern) > target_length:
+            # Truncate to target length
+            return pattern[:target_length]
+        else:
+            # Extend with rests to target length
+            return pattern + ('-' * (target_length - len(pattern)))
     
     def _create_quarter_note_pattern(self, pattern_str: str) -> str:
-        """Create quarter note version with hits only on strong beats"""
+        """Create quarter note version with hits only on strong beats (still 16 length)"""
         if not pattern_str:
             return pattern_str
         
@@ -406,20 +478,48 @@ class DataLoader:
             drum = drum.strip()
             pattern = pattern.strip()
             
-            # Extract quarter note positions (beats 1, 2, 3, 4)
+            # Normalize to 16 beats first
+            pattern = self._normalize_pattern_length(pattern, 16)
+            
+            # Create quarter note pattern - hits only on beats 1, 2, 3, 4 (positions 0, 4, 8, 12)
             quarter_pattern = ""
-            for i in range(4):
-                pos = i * 4  # Position 0, 4, 8, 12 for quarter notes
-                if pos < len(pattern):
-                    char = pattern[pos]
-                    # Keep hits, convert everything else to rest
-                    quarter_pattern += char if char in ['x', 'R', '_', '['] else "-"
+            for i in range(16):
+                if i in [0, 4, 8, 12]:  # Quarter note positions
+                    if i < len(pattern):
+                        char = pattern[i]
+                        # Keep hits, convert everything else to rest except keep strong accents
+                        quarter_pattern += char if char in ['x', 'X', 'o', 'R', '_', '['] else "-"
+                    else:
+                        quarter_pattern += "-"
                 else:
-                    quarter_pattern += "-"
+                    quarter_pattern += "-"  # All other positions are rests
             
             quarter_parts.append(f"{drum}: {quarter_pattern}")
         
         return "; ".join(quarter_parts)
+    
+    def _normalize_pattern_string(self, pattern_str: str) -> str:
+        """Normalize all drums in a pattern string to 16 beats"""
+        if not pattern_str:
+            return pattern_str
+        
+        parts = pattern_str.split(';')
+        normalized_parts = []
+        
+        for part in parts:
+            part = part.strip()
+            if ':' not in part:
+                continue
+                
+            drum, pattern = part.split(':', 1)
+            drum = drum.strip()
+            pattern = pattern.strip()
+            
+            # Normalize each drum pattern to 16 beats
+            normalized_pattern = self._normalize_pattern_length(pattern, 16)
+            normalized_parts.append(f"{drum}: {normalized_pattern}")
+        
+        return "; ".join(normalized_parts)
     
     def save_training_data(self, training_data: List[Dict[str, str]], filename: str = "training_data.json"):
         """Save training data to file

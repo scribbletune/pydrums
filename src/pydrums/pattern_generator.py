@@ -39,7 +39,9 @@ class PatternGenerator:
     def generate_pattern(self, description: str, 
                         style_hint: Optional[str] = None,
                         num_examples: int = 3,
-                        temperature: float = 0.7) -> Dict[str, Any]:
+                        temperature: float = 0.7,
+                        bars: int = 1,
+                        add_fill: bool = None) -> Dict[str, Any]:
         """Generate a drum pattern from text description
         
         Args:
@@ -47,6 +49,8 @@ class PatternGenerator:
             style_hint: Optional style hint to filter examples
             num_examples: Number of examples to use for few-shot learning
             temperature: Sampling temperature for generation
+            bars: Number of bars to generate (1-8)
+            add_fill: Whether to add drum fill in last bar (auto-detect if None)
             
         Returns:
             Dictionary with generated pattern and metadata
@@ -90,6 +94,10 @@ class PatternGenerator:
             pattern_data['examples_used'] = len(relevant_examples)
             pattern_data['detected_speed'] = detected_speed
             pattern_data['used_random_fallback'] = used_random_fallback
+            
+            # Extend to multiple bars and add fill if requested
+            if bars > 1 or add_fill:
+                pattern_data = self._extend_pattern_with_fill(pattern_data, bars, add_fill, description)
             
             return pattern_data
             
@@ -204,24 +212,34 @@ class PatternGenerator:
             "You are a professional drum pattern generator. Create ONLY the drum pattern using this notation:",
             "",
             "NOTATION GUIDE:",
-            "- x = hit/strike the drum",
+            "- x = hit/strike the drum (accent)",
+            "- X = loud hit (forte)",
+            "- o = medium hit",
+            "- _ = ghost note (quiet hit/pianissimo)",
             "- - = rest/silence",
             "- R = roll (extended sound)",
-            "- _ = ghost note (quiet hit)",
+            "- r = short roll/buzz",
             "- [ = flam start (grace note)",
             "- ] = flam end",
+            "- ^ = accent/emphasis",
+            "- . = staccato/short",
             "",
             "DRUM ABBREVIATIONS:",
+            "- bd = bass drum/kick",
+            "- sd = snare drum", 
             "- ch = closed hi-hat",
             "- oh = open hi-hat",
-            "- sd = snare drum", 
-            "- bd = bass drum",
             "- hh = hi-hat pedal",
-            "- cc = crash cymbal",
             "- rc = ride cymbal",
+            "- cc = crash cymbal",
+            "- rs = rim shot/side stick",
             "- ht = high tom",
             "- mt = mid tom", 
             "- lt = low tom",
+            "- cy = cymbal",
+            "- tb = tambourine",
+            "- cb = cowbell",
+            "- cp = clap",
             "",
             "FORMAT: drum: pattern; drum: pattern; ...",
             "",
@@ -249,14 +267,14 @@ class PatternGenerator:
         return "\\n".join(prompt_parts)
     
     def _parse_generated_pattern(self, generated_text: str) -> Dict[str, Any]:
-        """Parse generated pattern text into structured format"""
+        """Parse generated pattern text into structured format with normalization"""
         lines = generated_text.split('\\n')
         
         # Find the pattern line - look for drum pattern format
         pattern_lines = []
         for line in lines:
             line = line.strip()
-            if ':' in line and any(drum in line.lower() for drum in ['ch', 'sd', 'bd', 'oh', 'hh']):
+            if ':' in line and any(drum in line.lower() for drum in ['ch', 'sd', 'bd', 'oh', 'hh', 'rc']):
                 # Check if it looks like a valid pattern
                 parts = line.split(':', 1)
                 if len(parts) == 2:
@@ -264,7 +282,7 @@ class PatternGenerator:
                     pattern_part = parts[1].strip()
                     # Valid if drum is known and pattern has valid characters
                     if (len(drum_part) <= 4 and 
-                        any(c in pattern_part for c in ['x', '-', 'R', '_', '[', ']'])):
+                        any(c in pattern_part for c in ['x', 'X', 'o', '_', '-', 'R', 'r', '[', ']', '^', '.'])):
                         pattern_lines.append(line)
         
         # Join multiple pattern lines
@@ -273,6 +291,9 @@ class PatternGenerator:
         else:
             # Fallback to first line if no valid patterns found
             pattern_line = lines[0].strip() if lines else ""
+        
+        # Clean and normalize the pattern
+        pattern_line = self._clean_and_normalize_pattern(pattern_line)
         
         # Validate pattern
         is_valid = self._validate_pattern(pattern_line)
@@ -294,8 +315,8 @@ class PatternGenerator:
             return False
         
         # Check for basic structure
-        has_drum_notation = any(drum in pattern.lower() for drum in ['ch:', 'sd:', 'bd:', 'oh:', 'hh:'])
-        has_pattern_chars = any(char in pattern for char in ['x', '-', 'R', '_', '[', ']'])
+        has_drum_notation = any(drum in pattern.lower() for drum in ['ch:', 'sd:', 'bd:', 'oh:', 'hh:', 'rc:'])
+        has_pattern_chars = any(char in pattern for char in ['x', 'X', 'o', '_', '-', 'R', 'r', '[', ']', '^', '.'])
         
         return has_drum_notation and has_pattern_chars
     
@@ -334,22 +355,234 @@ class PatternGenerator:
         if not any(drum in pattern.lower() for drum in ['ch', 'sd', 'bd']):
             notes.append("Missing common drums (ch, sd, bd)")
         
-        if not any(char in pattern for char in ['x', '-']):
-            notes.append("Missing basic notation (x, -)")
+        if not any(char in pattern for char in ['x', 'X', 'o', '_', '-']):
+            notes.append("Missing basic notation (x, X, o, _, -)")
         
         if len(pattern) < 10:
             notes.append("Pattern seems very short")
         
         return notes
     
+    def _clean_and_normalize_pattern(self, pattern_line: str) -> str:
+        """Clean pattern line and normalize all drum patterns to 16 beats"""
+        if not pattern_line:
+            return pattern_line
+        
+        # Remove extra whitespace and clean formatting
+        pattern_line = ' '.join(pattern_line.split())
+        
+        # Split into drum parts
+        parts = pattern_line.split(';')
+        normalized_parts = []
+        
+        for part in parts:
+            part = part.strip()
+            if ':' not in part:
+                continue
+                
+            drum, pattern = part.split(':', 1)
+            drum = drum.strip().lower()
+            pattern = pattern.strip()
+            
+            # Remove any spaces within the pattern
+            pattern = ''.join(pattern.split())
+            
+            # Normalize pattern length to 16 beats
+            if len(pattern) > 16:
+                pattern = pattern[:16]  # Truncate if too long
+            elif len(pattern) < 16:
+                pattern = pattern + ('-' * (16 - len(pattern)))  # Pad with rests
+            
+            # Clean drum name
+            drum_clean = ''.join(c for c in drum if c.isalpha())
+            if drum_clean:
+                normalized_parts.append(f"{drum_clean}: {pattern}")
+        
+        return "; ".join(normalized_parts)
+    
+    def _extend_pattern_with_fill(self, pattern_data: Dict[str, Any], bars: int, add_fill: bool, description: str) -> Dict[str, Any]:
+        """Extend pattern to multiple bars and optionally add drum fill"""
+        if bars < 1:
+            bars = 1
+        if bars > 8:
+            bars = 8  # Reasonable limit
+            
+        # Auto-detect if fill should be added
+        if add_fill is None:
+            add_fill = self._should_add_fill(description, bars)
+        
+        base_pattern = pattern_data['pattern_line']
+        drum_patterns = pattern_data.get('drum_patterns', {})
+        
+        if bars == 1 and not add_fill:
+            return pattern_data
+        
+        # Detect style for appropriate fills
+        style = self._detect_style_from_description(description.lower())
+        
+        # Extend pattern to multiple bars
+        extended_patterns = {}
+        
+        for drum, pattern in drum_patterns.items():
+            if bars == 1:
+                # Single bar - replace with fill if requested
+                if add_fill:
+                    fill_pattern = self._generate_drum_fill(drum, style, pattern)
+                    extended_patterns[drum] = fill_pattern
+                else:
+                    extended_patterns[drum] = pattern
+            else:
+                # Multiple bars - repeat ORIGINAL pattern for all but last bar
+                if add_fill:
+                    # Use original pattern for first (bars-1) bars, then fill for last bar
+                    repeated_pattern = pattern * (bars - 1)
+                    fill_pattern = self._generate_drum_fill(drum, style, pattern)
+                    extended_patterns[drum] = repeated_pattern + fill_pattern
+                else:
+                    # No fill - just repeat original pattern for all bars
+                    extended_patterns[drum] = pattern * bars
+        
+        # Reconstruct pattern line
+        extended_parts = []
+        for drum, pattern in extended_patterns.items():
+            extended_parts.append(f"{drum}: {pattern}")
+        
+        # Update pattern data
+        pattern_data['pattern_line'] = "; ".join(extended_parts)
+        pattern_data['drum_patterns'] = extended_patterns
+        pattern_data['bars'] = bars
+        pattern_data['has_fill'] = add_fill
+        pattern_data['total_length'] = len(next(iter(extended_patterns.values()))) if extended_patterns else 16
+        
+        return pattern_data
+    
+    def _should_add_fill(self, description: str, bars: int) -> bool:
+        """Auto-detect if drum fill should be added based on description and bar count"""
+        desc_lower = description.lower()
+        
+        # Always add fill for multi-bar patterns unless explicitly avoided
+        if bars >= 4:
+            return True
+        elif bars >= 2:
+            # Add fill for 2-3 bars if description suggests it
+            fill_keywords = ['fill', 'break', 'outro', 'ending', 'transition', 'buildup']
+            return any(keyword in desc_lower for keyword in fill_keywords)
+        else:
+            # Single bar - only add if explicitly requested
+            fill_keywords = ['fill', 'break', 'roll', 'buildup']
+            return any(keyword in desc_lower for keyword in fill_keywords)
+    
+    def _detect_style_from_description(self, description: str) -> str:
+        """Detect musical style from description for appropriate fills"""
+        style_keywords = {
+            'rock': ['rock', 'metal', 'punk', 'grunge', 'alternative'],
+            'funk': ['funk', 'funky', 'groove', 'syncopated'],
+            'jazz': ['jazz', 'swing', 'bebop', 'smooth', 'brushes'],
+            'latin': ['latin', 'salsa', 'samba', 'bossa', 'mambo'],
+            'reggae': ['reggae', 'ska', 'one drop', 'jamaica'],
+            'blues': ['blues', 'shuffle', 'slow', 'soulful'],
+            'pop': ['pop', 'commercial', 'radio', 'catchy'],
+            'disco': ['disco', 'four on the floor', 'dance']
+        }
+        
+        for style, keywords in style_keywords.items():
+            if any(keyword in description for keyword in keywords):
+                return style
+        
+        return 'rock'  # Default style
+    
+    def _generate_drum_fill(self, drum: str, style: str, base_pattern: str) -> str:
+        """Generate a 16-beat drum fill pattern for the specified drum and style"""
+        
+        # Style-specific fill patterns (16 beats each) - More dramatic and obvious
+        fill_patterns = {
+            'rock': {
+                'bd': 'x-x-x-x-x-x-x-X-',  # Fast kick building to accent
+                'sd': '----x---x-r-R-R-',  # Normal hits then rolls at END
+                'ch': 'x-x-x-x---------',   # Hi-hat for first half, space for fill
+                'oh': '--------x---x---',   # Open hats accent the fill
+                'ht': '------x---x-x-x-',   # High tom buildup with more activity
+                'mt': '--------x---x-x-',   # Mid tom cascade with more hits
+                'lt': '----------x-x-X-',   # Low tom finale building up
+                'rc': '----------------',   # Drop out completely
+                'cc': '---------------X'    # Big crash ending
+            },
+            'funk': {
+                'bd': 'x---x---x-X-x-X-',  # Syncopated with accents
+                'sd': '----x-_-x-r-R-R-',  # Ghost notes + normal hits + rolls at END
+                'ch': 'x-x-x-x-x-x-----',   # Hi-hat groove then space
+                'oh': '----------------',   # Drop out
+                'ht': '--------x---x-x-',   # Tom buildup at end with more activity
+                'mt': '----------x-x-x-',   # Mid tom cascade with more hits
+                'lt': '------------x-X-',   # Low tom ending with buildup
+                'rc': '----------------'    # Drop out
+            },
+            'jazz': {
+                'bd': 'x-------x-------',  # Sparse kick (jazz style)
+                'sd': 'x-x---x---r-r-r-',  # Light snare hits then brush rolls at end
+                'ch': 'x-x-x-x---------',   # Hi-hat for first half
+                'oh': '--------x---x---',   # Open hats for accents
+                'rc': 'x-x-x-x-r-r-R-R-',  # Ride pattern then roll builds at end
+                'ht': '--------x---x-x-',   # Tom buildup at end with more activity
+                'mt': '----------x-x-x-',   # Mid tom cascade with more hits
+                'lt': '------------x-x-'    # Tom ending with buildup
+            },
+            'latin': {
+                'bd': 'x---x---x-x-x-X-',  # Building Latin kick
+                'sd': '----x-x---r-R-R-',  # Latin snare pattern then rolls at END
+                'ch': 'x-x-x-x---------',   # Hi-hat pattern then space
+                'rs': 'x-x-x-x-x-x-x-x-',  # Continuous rim shots (Latin style)
+                'ht': '------x---x-x-x-',   # High tom buildup with more activity
+                'mt': '--------x-x-x-x-',   # Mid tom cascade with more hits
+                'lt': '----------x-x-X-',   # Low tom finale building up
+                'cb': 'x-x-x-x-x-x-x-X-'    # Cowbell continuous with final accent
+            }
+        }
+        
+        # Get style-specific patterns, fall back to rock
+        style_fills = fill_patterns.get(style, fill_patterns['rock'])
+        
+        # Get fill pattern for this drum, or create a generic one
+        if drum in style_fills:
+            return style_fills[drum]
+        else:
+            # Generic dramatic fills based on drum type - less empty space
+            if drum in ['bd']:
+                return 'x-x-x-x-x-x-x-X-'  # Fast kick building to accent
+            elif drum in ['sd']:
+                return '----x---x-r-R-R-'  # Normal hits then roll BUILDS at the end
+            elif drum in ['ch']:
+                return 'x-x-x-x---------'   # Hi-hat groove then space for fill
+            elif drum in ['oh']:
+                return '--------x---x---'   # Open hats accent the fill
+            elif drum in ['ht']:
+                return '------x---x-x-x-'   # High tom buildup with more activity
+            elif drum in ['mt']:
+                return '--------x---x-x-'   # Mid tom cascade with more hits
+            elif drum in ['lt']:
+                return '----------x-x-X-'   # Low tom finale building up
+            elif drum in ['cc']:
+                return '---------------X'    # Big crash ending
+            elif drum in ['rc']:
+                return 'x-x---x-r-r-R-R-'   # Ride pattern then roll builds at end
+            elif drum in ['rs']:
+                return 'x-x-x-x-x-x-x-x-'   # Continuous rim shots
+            else:
+                # For other drums, create a less empty buildup pattern
+                return '----x---x-x-x-x-'   # Generic buildup with more activity
+    
     def _generate_basic_pattern(self, description: str) -> Dict[str, Any]:
         """Generate a basic pattern when no training data is available"""
-        # Simple rule-based generation as fallback
+        # Enhanced rule-based generation with musical dynamics
         basic_patterns = {
-            'rock': "ch: x---x---x---x---; sd: ----x-------x---; bd: x-----x-x-------",
-            'funk': "ch: x-x-x-x-x-x-x-x-; sd: ----x--x----x---; bd: x-----x---x-----",
-            'jazz': "ch: x-x-x-x-x-x-x-x-; sd: ----x-------x-x-; bd: x---------x-----",
-            'pop': "ch: x-x-x-x-x-x-x-x-; sd: ----x-------x---; bd: x-------x-------"
+            'rock': "bd: x---x---x---x---; sd: ----X-------X---; ch: x-x-x-x-x-x-x-x-",
+            'funk': "bd: x-----x---x-----; sd: ----X--_----X-_-; ch: x-x-x-x-x-x-x-x-; rc: ----o-o-----o-o-",
+            'jazz': "bd: x---------x-----; sd: ----x-------x-_-; rc: x-o-x-o-x-o-x-o-; hh: ----x---x---x---",
+            'pop': "bd: x-------x-------; sd: ----x-------x---; ch: x-x-x-x-x-x-x-x-",
+            'disco': "bd: x---x---x---x---; sd: ----x-------x---; ch: x-x-x-x-x-x-x-x-; oh: ------x-------x-",
+            'reggae': "bd: ----x-------x---; sd: ----X-------X---; ch: x-x---x-x-x---x-",
+            'latin': "bd: x-------x-x-----; sd: ----x--_----x---; rs: --x---x---x---x-",
+            'afro': "bd: x-------x-----x-; sd: ----x--_----x-_-; ch: x-x-x-x-x-x-x-x-; rs: --x-----x------"
         }
         
         # Try to match description to a style
