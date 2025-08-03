@@ -24,15 +24,20 @@ def main():
     # Initialize data loader
     loader = DataLoader()
     
-    # Load the original patterns
-    print("📥 Loading drum patterns from original source...")
-    patterns = loader.load_drum_machine_patterns_260()
+    # Load patterns from the new converted file
+    print("📥 Loading drum patterns from converted source with improved format...")
+    patterns = loader.load_drum_machine_patterns_260(use_converted=True)
     
     if not patterns:
-        print("❌ Failed to load patterns")
-        return
+        print("❌ Failed to load patterns from converted file")
+        print("Trying fallback to original source...")
+        patterns = loader.load_drum_machine_patterns_260(use_converted=False)
+        
+        if not patterns:
+            print("❌ Failed to load patterns from any source")
+            return
     
-    print(f"✅ Loaded {len(patterns)} original patterns")
+    print(f"✅ Loaded {len(patterns)} patterns with enhanced format")
     
     # Convert to improved training data
     print("🎵 Converting to enhanced training data...")

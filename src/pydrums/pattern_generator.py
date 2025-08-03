@@ -243,6 +243,12 @@ class PatternGenerator:
             "",
             "FORMAT: drum: pattern; drum: pattern; ...",
             "",
+            "CRITICAL RULES:",
+            "1. Each pattern should be 8-16 characters long for proper groove",
+            "2. Maintain rhythm throughout - avoid long stretches of silence (----)",
+            "3. Create complete musical phrases that loop naturally",
+            "4. Use varied dynamics (X, x, o, _, -) for musicality",
+            "",
             "IMPORTANT: Respond with ONLY the pattern in the specified format. No explanations, no extra text.",
             "",
             "EXAMPLES:",
@@ -387,11 +393,17 @@ class PatternGenerator:
             # Remove any spaces within the pattern
             pattern = ''.join(pattern.split())
             
-            # Normalize pattern length to 16 beats
+            # Normalize pattern length to 16 beats - REPEAT pattern instead of padding with silence
             if len(pattern) > 16:
                 pattern = pattern[:16]  # Truncate if too long
             elif len(pattern) < 16:
-                pattern = pattern + ('-' * (16 - len(pattern)))  # Pad with rests
+                # Repeat the pattern to fill 16 beats instead of padding with silence
+                if len(pattern) > 0:
+                    repetitions = 16 // len(pattern)
+                    remainder = 16 % len(pattern)
+                    pattern = (pattern * repetitions) + pattern[:remainder]
+                else:
+                    pattern = '-' * 16  # Fallback for empty patterns
             
             # Clean drum name
             drum_clean = ''.join(c for c in drum if c.isalpha())
@@ -662,13 +674,18 @@ class PatternGenerator:
         
         return results
     
-    def interactive_mode(self):
-        """Start interactive pattern generation mode"""
+    def interactive_mode(self, midi_converter=None, **midi_kwargs):
+        """Start interactive pattern generation mode with MIDI conversion"""
         print("🎮 INTERACTIVE PATTERN GENERATOR")
         print("=" * 50)
         print("Enter text descriptions to generate drum patterns!")
         print("Type 'quit' to exit")
         print()
+        
+        # Import here to avoid circular imports
+        if midi_converter is None:
+            from .midi_converter import MidiConverter
+            midi_converter = MidiConverter()
         
         while True:
             user_input = input("🎵 Describe a drum pattern: ").strip()
@@ -697,5 +714,13 @@ class PatternGenerator:
             
             if result['validation_notes']:
                 print(f"📝 Notes: {', '.join(result['validation_notes'])}")
+            
+            # Convert to MIDI automatically
+            if result['is_valid']:
+                try:
+                    midi_path = midi_converter.pattern_to_midi(result, **midi_kwargs)
+                    print(f"💾 MIDI saved: {midi_path}")
+                except Exception as e:
+                    print(f"❌ MIDI conversion failed: {e}")
             
             print()

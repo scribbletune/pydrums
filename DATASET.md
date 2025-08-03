@@ -169,6 +169,10 @@ PyDrums uses a 6-token notation system for representing drum patterns:
 - `ht` = High Tom
 - `mt` = Mid Tom
 - `lt` = Low Tom
+- `rs` = Rim Shot
+- `cb` = Cowbell
+- `tb` = Tambourine
+- `hc` = Hand Clap
 
 ### Pattern Format
 

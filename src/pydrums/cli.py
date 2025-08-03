@@ -111,9 +111,9 @@ def regenerate_training_data_command(args):
     print(f"Pattern lengths: {sorted(pattern_length_distribution.keys())}")
     print("\n✅ You can now generate patterns with speed variations!")
     print("Examples:")
-    print('  pydrums generate -d "Create a half-time funk groove" --to-midi')
-    print('  pydrums generate -d "Generate a double-time rock beat" --to-midi')
-    print('  pydrums generate -d "Make a simple quarter note disco pattern" --to-midi')
+    print('  pydrums generate -d "Create a half-time funk groove"')
+    print('  pydrums generate -d "Generate a double-time rock beat"')
+    print('  pydrums generate -d "Make a simple quarter note disco pattern"')
 
 
 def generate_command(args):
@@ -123,7 +123,13 @@ def generate_command(args):
     generator = PatternGenerator(args.model, args.data_dir)
     
     if args.interactive:
-        generator.interactive_mode()
+        converter = MidiConverter(args.output_dir)
+        generator.interactive_mode(
+            midi_converter=converter,
+            tempo_bpm=args.tempo,
+            loop_count=args.loops,
+            include_tempo=args.include_tempo
+        )
         return
     
     if args.description:
@@ -163,18 +169,17 @@ def generate_command(args):
         if result.get('used_random_fallback', False):
             print(f"   ⚠️  Used random examples (no keyword matches found)")
     
-    # Convert to MIDI if requested
-    if args.to_midi:
-        converter = MidiConverter(args.output_dir)
-        midi_files = converter.batch_convert(
-            results,
-            tempo_bpm=args.tempo,
-            loop_count=args.loops,
-            include_tempo=args.include_tempo
-        )
-        print(f"\n🎼 Created {len(midi_files)} MIDI files with speed-appropriate timing")
-        if not args.include_tempo:
-            print("   ℹ️  MIDI files are tempo-neutral (no tempo metadata)")
+    # Always convert to MIDI
+    converter = MidiConverter(args.output_dir)
+    midi_files = converter.batch_convert(
+        results,
+        tempo_bpm=args.tempo,
+        loop_count=args.loops,
+        include_tempo=args.include_tempo
+    )
+    print(f"\n🎼 Created {len(midi_files)} MIDI files with speed-appropriate timing")
+    if not args.include_tempo:
+        print("   ℹ️  MIDI files are tempo-neutral (no tempo metadata)")
     
     # Save results
     if args.save_patterns:
@@ -318,8 +323,6 @@ Examples:
                            help='Number of examples for few-shot learning')
     gen_parser.add_argument('-t', '--temperature', type=float, default=0.7,
                            help='Generation temperature')
-    gen_parser.add_argument('--to-midi', action='store_true',
-                           help='Convert generated patterns to MIDI')
     gen_parser.add_argument('--save-patterns', action='store_true',
                            help='Save generated patterns to JSON')
     gen_parser.add_argument('--tempo', type=int, default=120,

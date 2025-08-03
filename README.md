@@ -41,8 +41,8 @@ pip install -e .
 # 1. Setup training data (downloads 268 professional patterns with speed variations)
 pydrums setup-data --skip-primary
 
-# 2. Generate a pattern from 17 available styles with speed control
-pydrums generate -d "Create a funky afro-cuban beat" --to-midi
+# 2. Generate a pattern from 17 available styles with speed control (automatically creates MIDI)
+pydrums generate -d "Create a funky afro-cuban beat"
 
 # 3. Interactive mode - try any of the 17 styles with speed variations!
 pydrums generate --interactive
@@ -137,19 +137,19 @@ pydrums setup-data --additional-url "https://raw.githubusercontent.com/user/repo
 
 ```bash
 # Generate patterns from different styles in your dataset
-pydrums generate -d "Create a funk groove with ghost notes" --to-midi
-pydrums generate -d "Make an afro-cuban pattern" --to-midi
-pydrums generate -d "Generate a reggae one drop beat" --to-midi
-pydrums generate -d "Create a jazz shuffle pattern" --to-midi
-pydrums generate -d "Make a disco four-on-the-floor beat" --to-midi
-pydrums generate -d "Generate a bossa nova rhythm" --to-midi
-pydrums generate -d "Create a rock ballad pattern" --to-midi
+pydrums generate -d "Create a funk groove with ghost notes"
+pydrums generate -d "Make an afro-cuban pattern"
+pydrums generate -d "Generate a reggae one drop beat"
+pydrums generate -d "Create a jazz shuffle pattern"
+pydrums generate -d "Make a disco four-on-the-floor beat"
+pydrums generate -d "Generate a bossa nova rhythm"
+pydrums generate -d "Create a rock ballad pattern"
 
 # NEW: Speed variation examples
-pydrums generate -d "Create a half-time funk groove" --to-midi
-pydrums generate -d "Generate a double-time rock beat" --to-midi
-pydrums generate -d "Make a simple quarter note disco pattern" --to-midi
-pydrums generate -d "Create a laid-back jazz groove" --to-midi
+pydrums generate -d "Create a half-time funk groove"
+pydrums generate -d "Generate a double-time rock beat"
+pydrums generate -d "Make a simple quarter note disco pattern"
+pydrums generate -d "Create a laid-back jazz groove"
 ```
 
 ### Model Selection

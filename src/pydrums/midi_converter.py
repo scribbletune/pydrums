@@ -73,6 +73,18 @@ class MidiConverter:
         # Determine the speed to use
         speed = override_speed or pattern_data.get('detected_speed', 'normal')
         
+        # Auto-detect speed from pattern if not specified
+        if not override_speed and speed == 'normal':
+            drum_patterns_for_detection = pattern_data.get('drum_patterns', {})
+            if not drum_patterns_for_detection:
+                pattern_line = pattern_data.get('pattern_line', '')
+                drum_patterns_for_detection = self._parse_pattern_line(pattern_line)
+            
+            detected_speed = self._detect_pattern_speed(drum_patterns_for_detection)
+            if detected_speed:
+                speed = detected_speed
+                print(f"🔍 Auto-detected speed: {speed}")
+        
         # Calculate timing based on speed
         ticks_per_note = self._calculate_ticks_per_note(ticks_per_beat, speed)
         # Generate filename if not provided
@@ -231,27 +243,86 @@ class MidiConverter:
         return result
     
     def _calculate_ticks_per_note(self, ticks_per_beat: int, speed: Optional[str]) -> int:
-        """Calculate ticks per note based on speed setting
+        """Calculate ticks per note based on speed setting and pattern context
         
         Args:
-            ticks_per_beat: Base MIDI resolution
+            ticks_per_beat: Base MIDI resolution (typically 480)
             speed: Speed setting ('normal', 'half-time', 'double-time', 'quarter', or None)
             
         Returns:
             Ticks per pattern note position
         """
-        speed_multipliers = {
-            'half-time': 2,      # Each pattern position = 8th note (slower)
-            'double-time': 0.5,  # Each pattern position = 32nd note (faster)  
-            'quarter': 4,        # Each pattern position = quarter note (much slower)
-            'normal': 1,         # Each pattern position = 16th note (default)
-            None: 1              # Default to normal if no speed detected
+        # Standard musical note durations in ticks
+        ticks_per_quarter = ticks_per_beat
+        ticks_per_8th = ticks_per_beat // 2
+        ticks_per_16th = ticks_per_beat // 4
+        ticks_per_32nd = ticks_per_beat // 8
+        
+        # Map speed settings to actual note durations
+        speed_to_ticks = {
+            'quarter': ticks_per_quarter,    # Each pattern position = quarter note (1 beat)
+            'half-time': ticks_per_8th,      # Each pattern position = 8th note (half beat)
+            'normal': ticks_per_16th,        # Each pattern position = 16th note (quarter beat) - DEFAULT
+            'double-time': ticks_per_32nd,   # Each pattern position = 32nd note (eighth beat)
+            None: ticks_per_16th             # Default to 16th notes
         }
         
-        multiplier = speed_multipliers.get(speed, 1)
-        base_ticks_per_16th = ticks_per_beat // 4
+        ticks_per_note = speed_to_ticks.get(speed, ticks_per_16th)
         
-        return int(base_ticks_per_16th * multiplier)
+        print(f"🕐 Speed: {speed or 'normal'} -> {ticks_per_note} ticks per pattern position")
+        print(f"🕐 Reference: Quarter={ticks_per_quarter}, 8th={ticks_per_8th}, 16th={ticks_per_16th}, 32nd={ticks_per_32nd}")
+        
+        return ticks_per_note
+    
+    def _detect_pattern_speed(self, drum_patterns: Dict[str, str]) -> Optional[str]:
+        """Detect the most likely speed/timing for drum patterns based on length and density
+        
+        Args:
+            drum_patterns: Dictionary of drum patterns
+            
+        Returns:
+            Detected speed string or None if can't determine
+        """
+        if not drum_patterns:
+            return None
+        
+        # Analyze pattern lengths and hit density
+        pattern_lengths = [len(pattern) for pattern in drum_patterns.values()]
+        avg_length = sum(pattern_lengths) / len(pattern_lengths)
+        
+        # Count total hits across all patterns
+        total_hits = 0
+        total_positions = 0
+        
+        for pattern in drum_patterns.values():
+            hit_chars = ['x', 'X', 'o', 'R', 'r', '_', '[']
+            hits = sum(1 for char in pattern if char in hit_chars)
+            total_hits += hits
+            total_positions += len(pattern)
+        
+        hit_density = total_hits / max(total_positions, 1)
+        
+        print(f"🔍 Pattern analysis: avg_length={avg_length:.1f}, hit_density={hit_density:.2f}")
+        
+        # Detection logic based on pattern characteristics
+        if avg_length <= 4:
+            # Short patterns = likely quarter note patterns (each position = 1 beat)
+            return 'quarter'
+        elif avg_length <= 8:
+            # Medium patterns = likely 8th note patterns (each position = half beat)
+            return 'half-time'
+        elif avg_length >= 32 or hit_density > 0.6:
+            # Very long patterns or very dense = likely 32nd note patterns
+            return 'double-time'
+        elif 12 <= avg_length <= 20:
+            # Standard 16-beat patterns = 16th notes (each position = quarter beat)
+            return 'normal'
+        
+        # Default based on length
+        if avg_length <= 8:
+            return 'half-time'
+        else:
+            return 'normal'
     
     def _patterns_to_midi_events(self, 
                                 drum_patterns: Dict[str, str], 
