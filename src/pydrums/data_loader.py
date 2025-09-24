@@ -8,6 +8,8 @@ import requests
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 import pandas as pd
+import pickle
+import numpy as np
 
 
 class DataLoader:
@@ -808,7 +810,7 @@ class DataLoader:
         return "; ".join(normalized_parts)
     
     def save_training_data(self, training_data: List[Dict[str, str]], filename: str = "training_data.json"):
-        """Save training data to file
+        """Save training data to file and generate embeddings
         
         Args:
             training_data: List of training examples
@@ -820,6 +822,9 @@ class DataLoader:
             json.dump(training_data, f, indent=2)
         
         print(f"💾 Saved {len(training_data)} training examples to {output_path}")
+        
+        # Generate and save embeddings
+        self._generate_and_save_embeddings(training_data)
     
     def load_training_data(self, filename: str = "training_data.json") -> List[Dict[str, str]]:
         """Load training data from file
@@ -951,3 +956,70 @@ class DataLoader:
         except Exception as e:
             print(f"❌ Error loading DrumMachinePatterns260: {e}")
             return []
+    
+    def _generate_and_save_embeddings(self, training_data: List[Dict[str, str]]):
+        """Generate embeddings for training data and save to pickle file
+        
+        Args:
+            training_data: List of training examples with 'input' field
+        """
+        try:
+            from sentence_transformers import SentenceTransformer
+            print("🧠 Loading embedding model...")
+            
+            # Use a lightweight, fast model suitable for semantic search
+            model = SentenceTransformer('all-MiniLM-L6-v2')
+            
+            # Extract input texts for embedding
+            texts = [example.get('input', '') for example in training_data]
+            
+            print(f"🧠 Computing embeddings for {len(texts)} training examples...")
+            
+            # Generate embeddings in batches for efficiency
+            embeddings = model.encode(
+                texts, 
+                batch_size=32, 
+                show_progress_bar=True,
+                convert_to_numpy=True
+            )
+            
+            # Save embeddings to pickle file
+            embeddings_path = self.data_dir / "training_embeddings.pkl"
+            with open(embeddings_path, 'wb') as f:
+                pickle.dump(embeddings, f)
+            
+            print(f"💾 Saved embeddings to {embeddings_path}")
+            print(f"📊 Embedding shape: {embeddings.shape}")
+            print(f"📊 File size: ~{embeddings.nbytes / (1024*1024):.1f} MB")
+            
+        except ImportError:
+            print("⚠️  sentence-transformers not installed. Run: pip install sentence-transformers")
+            print("⚠️  Embeddings not generated. Pattern generation will use keyword matching.")
+        except Exception as e:
+            print(f"❌ Error generating embeddings: {e}")
+            print("⚠️  Pattern generation will use keyword matching fallback.")
+    
+    def load_embeddings(self, filename: str = "training_embeddings.pkl") -> Optional[np.ndarray]:
+        """Load precomputed embeddings from pickle file
+        
+        Args:
+            filename: Embeddings filename
+            
+        Returns:
+            Numpy array of embeddings or None if not found
+        """
+        embeddings_path = self.data_dir / filename
+        
+        if not embeddings_path.exists():
+            return None
+        
+        try:
+            with open(embeddings_path, 'rb') as f:
+                embeddings = pickle.load(f)
+            
+            print(f"📚 Loaded embeddings: {embeddings.shape}")
+            return embeddings
+            
+        except Exception as e:
+            print(f"❌ Error loading embeddings: {e}")
+            return None

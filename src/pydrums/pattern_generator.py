@@ -8,6 +8,8 @@ import json
 import random
 from typing import List, Dict, Any, Optional, Tuple
 from pathlib import Path
+import numpy as np
+from sklearn.metrics.pairwise import cosine_similarity
 
 
 class PatternGenerator:
@@ -23,7 +25,10 @@ class PatternGenerator:
         self.model_name = model_name
         self.data_dir = Path(data_dir)
         self.training_data = []
+        self.training_embeddings = None
+        self.embedding_model = None
         self._load_training_data()
+        self._load_embedding_model()
         
     def _load_training_data(self):
         """Load training data for few-shot learning"""
@@ -33,8 +38,37 @@ class PatternGenerator:
             with open(training_file, 'r') as f:
                 self.training_data = json.load(f)
             print(f"📚 Loaded {len(self.training_data)} training examples")
+            
+            # Try to load precomputed embeddings
+            self._load_embeddings()
         else:
             print("⚠️  No training data found. Run data collection first.")
+    
+    def _load_embeddings(self):
+        """Load precomputed embeddings"""
+        from .data_loader import DataLoader
+        
+        loader = DataLoader(self.data_dir)
+        self.training_embeddings = loader.load_embeddings()
+        
+        if self.training_embeddings is not None:
+            print(f"🎯 Semantic search enabled with embeddings")
+        else:
+            print(f"⚠️  No embeddings found. Using keyword matching fallback")
+    
+    def _load_embedding_model(self):
+        """Load embedding model for query encoding"""
+        if self.training_embeddings is not None:
+            try:
+                from sentence_transformers import SentenceTransformer
+                self.embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
+                print(f"🧠 Embedding model loaded for query processing")
+            except ImportError:
+                print("⚠️  sentence-transformers not installed. Using keyword fallback.")
+                self.training_embeddings = None
+            except Exception as e:
+                print(f"❌ Error loading embedding model: {e}")
+                self.training_embeddings = None
     
     def generate_pattern(self, description: str, 
                         style_hint: Optional[str] = None,
@@ -63,9 +97,14 @@ class PatternGenerator:
             return basic_pattern
         
         # Find relevant examples and detect speed
-        relevant_examples, detected_speed, used_random_fallback = self._find_relevant_examples(
-            description, style_hint, num_examples
-        )
+        if self.training_embeddings is not None and self.embedding_model is not None:
+            relevant_examples, detected_speed, used_random_fallback = self._find_relevant_examples_with_embeddings(
+                description, style_hint, num_examples
+            )
+        else:
+            relevant_examples, detected_speed, used_random_fallback = self._find_relevant_examples(
+                description, style_hint, num_examples
+            )
         
         # Create prompt
         prompt = self._create_prompt(description, relevant_examples)
@@ -202,6 +241,65 @@ class PatternGenerator:
                 min(remaining_needed, len(available_examples))
             )
             relevant_examples.extend(additional)
+        
+        return relevant_examples, detected_speed, used_random_fallback
+    
+    def _find_relevant_examples_with_embeddings(self, description: str, 
+                                              style_hint: Optional[str], 
+                                              num_examples: int) -> Tuple[List[Dict[str, Any]], Optional[str], bool]:
+        """Find relevant training examples using semantic similarity with embeddings"""
+        
+        # Detect speed from description
+        detected_speed = self._detect_speed_from_description(description.lower())
+        
+        # Encode user query
+        query_embedding = self.embedding_model.encode([description])
+        
+        # Compute semantic similarities
+        similarities = cosine_similarity(query_embedding, self.training_embeddings)[0]
+        
+        # Score examples with hybrid approach
+        scored_examples = []
+        
+        for i, example in enumerate(self.training_data):
+            # Base semantic similarity score (0-1) scaled to match keyword scoring
+            semantic_score = similarities[i] * 10
+            
+            # Speed matching bonus
+            example_speed = example.get('speed', 'normal')
+            if detected_speed:
+                if detected_speed == 'half-time' and example_speed == 'half_time':
+                    semantic_score += 5
+                elif detected_speed == 'double-time' and example_speed == 'double_time':
+                    semantic_score += 5
+                elif detected_speed == 'quarter' and example_speed == 'quarter_notes':
+                    semantic_score += 5
+                elif example_speed != 'normal' and example_speed != detected_speed.replace('-', '_'):
+                    semantic_score -= 1
+            
+            # Style hint bonus
+            if style_hint:
+                example_style = example.get('style', '').lower()
+                if style_hint.lower() in example_style:
+                    semantic_score += 3
+            
+            scored_examples.append((semantic_score, example))
+        
+        # Sort by similarity and take top examples
+        scored_examples.sort(key=lambda x: x[0], reverse=True)
+        
+        # Check if we have meaningful semantic matches
+        top_score = scored_examples[0][0] if scored_examples else 0
+        semantic_threshold = 3.0  # Minimum semantic similarity threshold
+        has_meaningful_matches = top_score >= semantic_threshold
+        used_random_fallback = not has_meaningful_matches
+        
+        if used_random_fallback:
+            print(f"⚠️  Low semantic similarity for '{description}' - using top matches anyway")
+        else:
+            print(f"🎯 Found {len([s for s, _ in scored_examples if s >= semantic_threshold])} semantically similar examples")
+        
+        relevant_examples = [ex[1] for ex in scored_examples[:num_examples]]
         
         return relevant_examples, detected_speed, used_random_fallback
     
